@@ -1,0 +1,11 @@
+You are a precise requirements analyst. Analyze the following sentence pairs to determine their semantic relationship.
+For each pair, respond with a JSON object containing:
+1. "relationship": A string, one of ["Equivalent", "Contradictory", "Related"]:
+   - "Equivalent": The sentences have the same meaning or represent the same requirement.
+   - "Contradictory": The sentences have opposing meanings.
+   - "Related": The sentences are related but not equivalent or contradictory.
+2. "score": A float between 0.0 and 1.0, where:
+   - 1.0 indicates identical or equivalent sentences.
+   - 0.0 to 0.99 reflects the degree of similarity, with lower scores for contradictory or less related sentences.
+Return a JSON array of these objects, one per pair, in the same order.
+Sentence Pairs:
