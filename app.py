@@ -4,13 +4,8 @@ from logging.handlers import RotatingFileHandler
 import sys
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-
 # Set page config as the first Streamlit command
-st.set_page_config(layout="wide", page_title="Similarity Assist")
+st.set_page_config(layout="wide", page_title="Requivalance")
 
 from app.config import (
     LOG_LEVEL, DEFAULT_THRESHOLDS, MAX_FILE_SIZE,
@@ -19,7 +14,7 @@ from app.config import (
 from app.pipeline import run_similarity_pipeline
 from app.postprocess import display_summary, create_highlighted_excel, df_to_html_table
 from app.utils import plot_embeddings
-from app.llm_service import get_llm_analysis_batch
+from app.llm_service import get_llm_analysis_batch, client as llm_client  # Import llm_client
 
 # Setup logging
 for handler in logging.root.handlers[:]:
@@ -48,20 +43,24 @@ def load_sidebar():
             
             # --- Base File Logic ---
             base_file = st.file_uploader("Base Excel File 📑", type=["xlsx"])
-            if base_file:
+            if base_file:  # This is the crucial check
                 if base_file.size > MAX_FILE_SIZE:
                     st.error(f"Base file size exceeds {MAX_FILE_SIZE/1024/1024}MB limit")
-                    base_file = None
+                    # We invalidate the file by setting it to None so the rest of the app knows
+                    base_file = None 
                 else:
+                    # Only show success if the file is valid
                     st.markdown('<p class="upload-success">✅ Base file uploaded!</p>', unsafe_allow_html=True)
 
             # --- Check File Logic ---
             check_file = st.file_uploader("Check Excel File 📝", type=["xlsx"])
-            if check_file:
+            if check_file: # This is the crucial check
                 if check_file.size > MAX_FILE_SIZE:
                     st.error(f"Check file size exceeds {MAX_FILE_SIZE/1024/1024}MB limit")
+                    # We invalidate the file by setting it to None
                     check_file = None
                 else:
+                    # Only show success if the file is valid
                     st.markdown('<p class="upload-success">✅ Check file uploaded!</p>', unsafe_allow_html=True)
 
             top_k = st.number_input("Top K Matches 🎯", min_value=1, max_value=10, value=3)
@@ -82,7 +81,7 @@ def load_sidebar():
 
 def main():
     """Main function to run the Streamlit application."""
-    st.markdown("<h1 style='text-align: center;'>📘Similarity Assist🔍</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>📘 Requivalance — 🧠Smart Requirement Matcher🔍</h1>", unsafe_allow_html=True)
     try:
         with open("static/css/custom.css") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
@@ -135,92 +134,90 @@ def main():
             display_summary(df.to_dict('records'))
 
         st.subheader("🤖 AI-Powered Deep Analysis")
-        st.markdown(f"""
-            Click the button below to use a powerful LLM to analyze the results.
-            - Pairs with `Similarity Score` > **{LLM_PERFECT_MATCH_THRESHOLD}** will be auto-labeled 'Equivalent (Auto)'.
-            - Pairs with `Similarity Score` < **{LLM_ANALYSIS_MIN_THRESHOLD}** will be skipped.
-            """)
+        if llm_client is None:
+            st.warning("⚠️ LLM key and URL is not added. LLM analysis is unavailable.")
+        else:
+            st.markdown(f"""
+                Click the button below to use a powerful LLM to analyze the results.
+                - Pairs with `Similarity Score` > **{LLM_PERFECT_MATCH_THRESHOLD}** will be auto-labeled 'Equivalent (Auto)'.
+                - Pairs with `Similarity Score` < **{LLM_ANALYSIS_MIN_THRESHOLD}** will be skipped.
+                """)
 
-        if st.button("🔬 Enhance with LLM Analysis"):
-            if 'LLM_Relationship' in df.columns:
-                st.info("LLM analysis has already been performed.")
-            else:
-                progress_bar = st.progress(0, text="Starting LLM analysis...")
-                llm_results = []
-                total_tokens = {'prompt_tokens': 0, 'completion_tokens': 0}
-                total_rows = len(df)
-                batch_size = 10
+            if st.button("🔬 Enhance with LLM Analysis"):
+                if 'LLM_Relationship' in df.columns:
+                    st.info("LLM analysis has already been performed.")
+                else:
+                    progress_bar = st.progress(0, text="Starting LLM analysis...")
+                    llm_results = []
+                    total_tokens = {'prompt_tokens': 0, 'completion_tokens': 0}
+                    total_rows = len(df)
+                    batch_size = 10
 
-                for i in range(0, total_rows, batch_size):
-                    batch_rows = df.iloc[i:i + batch_size]
-                    sentence_pairs = [
-                        (row['Query_Sentence_Cleaned_text'], row['Matched_Sentence_Cleaned_text'])
-                        for _, row in batch_rows.iterrows()
-                    ]
-                    batch_results = [None] * len(sentence_pairs)
-                    llm_pairs = []
-                    llm_indices = []
+                    for i in range(0, total_rows, batch_size):
+                        batch_rows = df.iloc[i:i + batch_size]
+                        sentence_pairs = [
+                            (row['Query_Sentence_Cleaned_text'], row['Matched_Sentence_Cleaned_text'])
+                            for _, row in batch_rows.iterrows()
+                        ]
+                        batch_results = [None] * len(sentence_pairs)
+                        llm_pairs = []
+                        llm_indices = []
 
-                    for j, (sentence1, sentence2) in enumerate(sentence_pairs):
-                        score = batch_rows.iloc[j]['Similarity_Score']
-                        if score >= LLM_PERFECT_MATCH_THRESHOLD:
-                            batch_results[j] = {'LLM_Score': 1.0, 'LLM_Relationship': 'Equivalent (Auto)'}
-                        elif score < LLM_ANALYSIS_MIN_THRESHOLD:
-                            batch_results[j] = {'LLM_Score': 'N/A', 'LLM_Relationship': 'Below Threshold'}
-                        else:
-                            llm_pairs.append((sentence1, sentence2))
-                            llm_indices.append(j)
+                        for j, (sentence1, sentence2) in enumerate(sentence_pairs):
+                            score = batch_rows.iloc[j]['Similarity_Score']
+                            if score >= LLM_PERFECT_MATCH_THRESHOLD:
+                                batch_results[j] = {'LLM_Score': 1.0, 'LLM_Relationship': 'Equivalent (Auto)'}
+                            elif score < LLM_ANALYSIS_MIN_THRESHOLD:
+                                batch_results[j] = {'LLM_Score': 'N/A', 'LLM_Relationship': 'Below Threshold'}
+                            else:
+                                llm_pairs.append((sentence1, sentence2))
+                                llm_indices.append(j)
 
-                    if llm_pairs:
-                        batch_response = get_llm_analysis_batch(llm_pairs)
-                        llm_batch_results = batch_response['results']
-                        total_tokens['prompt_tokens'] += batch_response['tokens_used'].get('prompt_tokens', 0)
-                        total_tokens['completion_tokens'] += batch_response['tokens_used'].get('completion_tokens', 0)
-                        logging.info(f"Batch {i//batch_size + 1}: Prompt tokens = {batch_response['tokens_used']['prompt_tokens']}, Completion tokens = {batch_response['tokens_used']['completion_tokens']}, LLM Pairs = {len(llm_pairs)}, LLM Results = {len(llm_batch_results)}")
+                        if llm_pairs:
+                            batch_response = get_llm_analysis_batch(llm_pairs)
+                            llm_batch_results = batch_response['results']
+                            total_tokens['prompt_tokens'] += batch_response['tokens_used'].get('prompt_tokens', 0)
+                            total_tokens['completion_tokens'] += batch_response['tokens_used'].get('completion_tokens', 0)
+                            logging.info(f"Batch {i//batch_size + 1}: Prompt tokens = {batch_response['tokens_used']['prompt_tokens']}, Completion tokens = {batch_response['tokens_used']['completion_tokens']}, LLM Pairs = {len(llm_pairs)}, LLM Results = {len(llm_batch_results)}")
 
-                        # Check for missing URL/key error
-                        if llm_batch_results and llm_batch_results[0]['LLM_Relationship'] == 'LLM URL and Key not available':
-                            st.error("❌ LLM URL and Key not available. Please configure environment variables.")
+                            if len(llm_batch_results) != len(llm_pairs):
+                                logging.error(f"Batch {i//batch_size + 1}: LLM result length mismatch: expected {len(llm_pairs)}, got {len(llm_batch_results)}")
+                                st.error(f"Error: Batch {i//batch_size + 1} LLM results length mismatch.")
+                                return
+
+                            for idx, result in zip(llm_indices, llm_batch_results):
+                                batch_results[idx] = result
+
+                        if None in batch_results:
+                            logging.error(f"Batch {i//batch_size + 1}: Missing results for some indices: {batch_results}")
+                            st.error(f"Error: Batch {i//batch_size + 1} has missing results.")
                             return
 
-                        if len(llm_batch_results) != len(llm_pairs):
-                            logging.error(f"Batch {i//batch_size + 1}: LLM result length mismatch: expected {len(llm_pairs)}, got {len(llm_batch_results)}")
-                            st.error(f"Error: Batch {i//batch_size + 1} LLM results length mismatch.")
+                        if len(batch_results) != len(sentence_pairs):
+                            logging.error(f"Batch {i//batch_size + 1} result length mismatch: expected {len(sentence_pairs)}, got {len(batch_results)}")
+                            st.error(f"Error: Batch {i//batch_size + 1} produced incorrect number of results.")
                             return
 
-                        for idx, result in zip(llm_indices, llm_batch_results):
-                            batch_results[idx] = result
+                        llm_results.extend(batch_results)
+                        progress_bar.progress(min((i + batch_size) / total_rows, 1.0), text=f"Analyzing batch {i//batch_size + 1}...")
 
-                    if None in batch_results:
-                        logging.error(f"Batch {i//batch_size + 1}: Missing results for some indices: {batch_results}")
-                        st.error(f"Error: Batch {i//batch_size + 1} has missing results.")
+                    if len(llm_results) != total_rows:
+                        logging.error(f"LLM results length mismatch: expected {total_rows}, got {len(llm_results)}")
+                        st.error(f"Error: LLM results length ({len(llm_results)}) does not match expected ({total_rows}).")
                         return
 
-                    if len(batch_results) != len(sentence_pairs):
-                        logging.error(f"Batch {i//batch_size + 1} result length mismatch: expected {len(sentence_pairs)}, got {len(batch_results)}")
-                        st.error(f"Error: Batch {i//batch_size + 1} produced incorrect number of results.")
-                        return
+                    llm_df = pd.DataFrame(llm_results, index=df.index)
+                    st.session_state.results_df = pd.concat([df, llm_df], axis=1)
+                    st.session_state.total_tokens = total_tokens
 
-                    llm_results.extend(batch_results)
-                    progress_bar.progress(min((i + batch_size) / total_rows, 1.0), text=f"Analyzing batch {i//batch_size + 1}...")
-
-                if len(llm_results) != total_rows:
-                    logging.error(f"LLM results length mismatch: expected {total_rows}, got {len(llm_results)}")
-                    st.error(f"Error: LLM results length ({len(llm_results)}) does not match expected ({total_rows}).")
-                    return
-
-                llm_df = pd.DataFrame(llm_results, index=df.index)
-                st.session_state.results_df = pd.concat([df, llm_df], axis=1)
-                st.session_state.total_tokens = total_tokens
-
-                st.success("✅ LLM Analysis Complete!")
-                st.rerun()
+                    st.success("✅ LLM Analysis Complete!")
+                    st.rerun()
 
         st.subheader("📋 Results Table")
         note = f"**Note**: Skipped {base_skipped} base and {user_skipped} query entries due to empty or invalid text."
-        if 'LLM_Relationship' in df.columns:
-            total_token_count = st.session_state.total_tokens['prompt_tokens'] + st.session_state.total_tokens['completion_tokens']
-            note += "<br>📊 **Total LLM tokens used**: " + str(total_token_count) + " (" + str(st.session_state.total_tokens['prompt_tokens']) + " prompt + " + str(st.session_state.total_tokens['completion_tokens']) + " completion)"
+        if 'LLM_Relationship' in df.columns and llm_client is not None:
+            total_token_count = st.session_state.total_tokens.get('prompt_tokens', 0) + st.session_state.total_tokens.get('completion_tokens', 0)
+            note += f"<br>📊 **Total LLM tokens used**: {total_token_count} ({st.session_state.total_tokens.get('prompt_tokens', 0)} prompt + {st.session_state.total_tokens.get('completion_tokens', 0)} completion)"
         st.markdown(note, unsafe_allow_html=True)
         st.markdown(df_to_html_table(df, base_data, user_data), unsafe_allow_html=True)
 
