@@ -134,7 +134,6 @@ def main():
             display_summary(df.to_dict('records'))
 
         st.subheader("🤖 AI-Powered Deep Analysis")
-        st.warning("⚠️ LLM key and URL is not added. LLM analysis is unavailable.")
         if llm_client is None:
             st.warning("⚠️ LLM key and URL is not added. LLM analysis is unavailable.")
         else:
