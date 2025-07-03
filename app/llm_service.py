@@ -8,30 +8,24 @@ import hashlib
 import tiktoken
 from app.config import (
     LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_CACHE_FILE,
-    SYSTEM_PROMPT_PATH
+    SYSTEM_PROMPT_PATH, LLM_BATCH_TOKEN_LIMIT
 )
 
 logger = logging.getLogger(__name__)
 
-def initialize_client():
-    """Initialize OpenAI client if API key and base URL are provided."""
-    if not LLM_API_KEY or not LLM_BASE_URL:
-        logger.warning("LLM API Key or Base URL not configured.")
-        return None
-    try:
+client = None
+try:
+    if not LLM_API_KEY or "YOUR_SUBSCRIPTION_KEY_HERE" in LLM_API_KEY:
+        logger.error("LLM API Key not configured.")
+    else:
         client = OpenAI(
             api_key="dummy",
             base_url=LLM_BASE_URL,
-            default_headers={"": LLM_API_KEY},
+            default_headers={"genaiplatform-farm-subscription-key": LLM_API_KEY},
             timeout=30
         )
-        logger.info("OpenAI client initialized successfully.")
-        return client
-    except Exception as e:
-        logger.error(f"Failed to initialize OpenAI client: {e}")
-        return None
-
-client = initialize_client()
+except Exception as e:
+    logger.error(f"Failed to initialize OpenAI client: {e}")
 
 # Load system prompt from external file for maintainability
 try:
@@ -39,7 +33,7 @@ try:
         SYSTEM_PROMPT_TEMPLATE = f.read()
 except FileNotFoundError:
     logger.error(f"System prompt file not found at: {SYSTEM_PROMPT_PATH}")
-    SYSTEM_PROMPT_TEMPLATE = "Error: System prompt could not be loaded."
+    SYSTEM_PROMPT_TEMPLATE = "Error: System prompt could not be loaded." # Fallback
 
 def compute_prompt_hash(prompt: str) -> str:
     """Compute a hash for a prompt."""
@@ -138,10 +132,13 @@ def _process_batch(batch_pairs: list, cache: dict) -> dict:
 def get_llm_analysis_batch(sentence_pairs: list) -> dict:
     """
     Analyzes sentence pairs by iteratively creating batches that respect token limits.
-    Returns an error if the client is not configured.
+    This avoids recursion errors and is more robust for production.
     """
     if not client:
-        return {'results': [{'LLM_Score': 'Error', 'LLM_Relationship': 'LLM URL and Key not available'}] * len(sentence_pairs), 'tokens_used': {}}
+        return {
+            'results': [{'LLM_Score': 'Error', 'LLM_Relationship': 'Client Not Configured'}] * len(sentence_pairs),
+            'tokens_used': {'prompt_tokens': 0, 'completion_tokens': 0}
+        }
 
     cache = load_llm_cache()
     all_results = [None] * len(sentence_pairs)
