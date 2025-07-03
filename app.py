@@ -5,7 +5,7 @@ import sys
 import pandas as pd
 import streamlit as st
 # Set page config as the first Streamlit command
-st.set_page_config(layout="wide", page_title="Requivalance")
+st.set_page_config(layout="wide", page_title="Similarity Assist")
 
 from app.config import (
     LOG_LEVEL, DEFAULT_THRESHOLDS, MAX_FILE_SIZE,
@@ -81,7 +81,7 @@ def load_sidebar():
 
 def main():
     """Main function to run the Streamlit application."""
-    st.markdown("<h1 style='text-align: center;'>📘 Requivalance — 🧠Smart Requirement Matcher🔍</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>📘 Similarity Assist🔍</h1>", unsafe_allow_html=True)
     try:
         with open("static/css/custom.css") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
@@ -134,6 +134,7 @@ def main():
             display_summary(df.to_dict('records'))
 
         st.subheader("🤖 AI-Powered Deep Analysis")
+        st.warning("⚠️ LLM key and URL is not added. LLM analysis is unavailable.")
         if llm_client is None:
             st.warning("⚠️ LLM key and URL is not added. LLM analysis is unavailable.")
         else:
