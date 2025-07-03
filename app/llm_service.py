@@ -1,8 +1,6 @@
 import os
 import json
 import logging
-from openai import OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import requests
 import hashlib
 import tiktoken
@@ -13,27 +11,18 @@ from app.config import (
 
 logger = logging.getLogger(__name__)
 
-client = None
-try:
-    if not LLM_API_KEY or "YOUR_SUBSCRIPTION_KEY_HERE" in LLM_API_KEY:
-        logger.error("LLM API Key not configured.")
-    else:
-        client = OpenAI(
-            api_key="dummy",
-            base_url=LLM_BASE_URL,
-            default_headers={"genaiplatform-farm-subscription-key": LLM_API_KEY},
-            timeout=30
-        )
-except Exception as e:
-    logger.error(f"Failed to initialize OpenAI client: {e}")
+# Check if Hugging Face API is configured
+client_available = bool(LLM_API_KEY and LLM_API_KEY != "YOUR_SUBSCRIPTION_KEY_HERE")
+if not client_available:
+    logger.error("Hugging Face API key not configured.")
 
-# Load system prompt from external file for maintainability
+# Load system prompt
 try:
     with open(SYSTEM_PROMPT_PATH, 'r', encoding='utf-8') as f:
         SYSTEM_PROMPT_TEMPLATE = f.read()
 except FileNotFoundError:
     logger.error(f"System prompt file not found at: {SYSTEM_PROMPT_PATH}")
-    SYSTEM_PROMPT_TEMPLATE = "Error: System prompt could not be loaded." # Fallback
+    SYSTEM_PROMPT_TEMPLATE = "Error: System prompt could not be loaded."
 
 def compute_prompt_hash(prompt: str) -> str:
     """Compute a hash for a prompt."""
@@ -65,26 +54,25 @@ def estimate_tokens(text: str) -> int:
         encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(text, disallowed_special=()))
     except Exception:
-        # Fallback for when tiktoken might fail
         return len(text) // 4
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((requests.exceptions.RequestException,))
-)
 def _call_llm_api(full_prompt: str, num_pairs: int) -> dict:
-    """Helper function to make the actual API call and handle responses."""
+    """Helper function to make the API call to Hugging Face and handle responses."""
     content, prompt_tokens, completion_tokens = "", 0, 0
     try:
         prompt_tokens = estimate_tokens(full_prompt)
-        response = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": full_prompt}],
-            temperature=0.0,
-            n=1
+        headers = {"Authorization": f"Bearer {LLM_API_KEY}"}
+        response = requests.post(
+            LLM_BASE_URL,
+            headers=headers,
+            json={
+                "inputs": full_prompt,
+                "parameters": {"temperature": 0.0, "max_tokens": 1000}
+            },
+            timeout=30
         )
-        content = response.choices[0].message.content
+        response.raise_for_status()
+        content = response.json()[0].get("generated_text", "")
         completion_tokens = estimate_tokens(content)
         json_str = content.strip().lstrip('```json').rstrip('```').strip()
         analysis = json.loads(json_str)
@@ -123,7 +111,6 @@ def _process_batch(batch_pairs: list, cache: dict) -> dict:
     logger.info(f"Calling LLM for a batch of {len(batch_pairs)} pairs.")
     response = _call_llm_api(full_prompt, len(batch_pairs))
     
-    # Only cache successful, valid results
     if all(res.get('LLM_Relationship') not in ['Error', 'Parse Error'] for res in response['results']):
         cache[cache_key] = response
         
@@ -132,11 +119,10 @@ def _process_batch(batch_pairs: list, cache: dict) -> dict:
 def get_llm_analysis_batch(sentence_pairs: list) -> dict:
     """
     Analyzes sentence pairs by iteratively creating batches that respect token limits.
-    This avoids recursion errors and is more robust for production.
     """
-    if not client:
+    if not client_available:
         return {
-            'results': [{'LLM_Score': 'Error', 'LLM_Relationship': 'Client Not Configured'}] * len(sentence_pairs),
+            'results': [{'LLM_Score': 'Error', 'LLM_Relationship': 'Hugging Face API Not Configured'}] * len(sentence_pairs),
             'tokens_used': {'prompt_tokens': 0, 'completion_tokens': 0}
         }
 
@@ -177,7 +163,6 @@ def get_llm_analysis_batch(sentence_pairs: list) -> dict:
     
     save_llm_cache(cache)
     
-    # Sanity check to ensure no results were missed
     if None in all_results:
         logger.error("LLM analysis resulted in missing data points. Filling with errors.")
         all_results = [res if res is not None else {'LLM_Score': 'Error', 'LLM_Relationship': 'Processing Error'} for res in all_results]

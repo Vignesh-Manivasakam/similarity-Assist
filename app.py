@@ -4,7 +4,6 @@ from logging.handlers import RotatingFileHandler
 import sys
 import pandas as pd
 import streamlit as st
-# Set page config as the first Streamlit command
 st.set_page_config(layout="wide", page_title="Similarity Assist")
 
 from app.config import (
@@ -14,7 +13,7 @@ from app.config import (
 from app.pipeline import run_similarity_pipeline
 from app.postprocess import display_summary, create_highlighted_excel, df_to_html_table
 from app.utils import plot_embeddings
-from app.llm_service import get_llm_analysis_batch, client as llm_client  # Import llm_client
+from app.llm_service import get_llm_analysis_batch, client_available
 
 # Setup logging
 for handler in logging.root.handlers[:]:
@@ -41,26 +40,20 @@ def load_sidebar():
         with st.expander("Upload Files", expanded=True):
             st.markdown('<div class="card">', unsafe_allow_html=True)
             
-            # --- Base File Logic ---
             base_file = st.file_uploader("Base Excel File 📑", type=["xlsx"])
-            if base_file:  # This is the crucial check
+            if base_file:
                 if base_file.size > MAX_FILE_SIZE:
                     st.error(f"Base file size exceeds {MAX_FILE_SIZE/1024/1024}MB limit")
-                    # We invalidate the file by setting it to None so the rest of the app knows
                     base_file = None 
                 else:
-                    # Only show success if the file is valid
                     st.markdown('<p class="upload-success">✅ Base file uploaded!</p>', unsafe_allow_html=True)
 
-            # --- Check File Logic ---
             check_file = st.file_uploader("Check Excel File 📝", type=["xlsx"])
-            if check_file: # This is the crucial check
+            if check_file:
                 if check_file.size > MAX_FILE_SIZE:
                     st.error(f"Check file size exceeds {MAX_FILE_SIZE/1024/1024}MB limit")
-                    # We invalidate the file by setting it to None
                     check_file = None
                 else:
-                    # Only show success if the file is valid
                     st.markdown('<p class="upload-success">✅ Check file uploaded!</p>', unsafe_allow_html=True)
 
             top_k = st.number_input("Top K Matches 🎯", min_value=1, max_value=10, value=3)
@@ -134,8 +127,8 @@ def main():
             display_summary(df.to_dict('records'))
 
         st.subheader("🤖 AI-Powered Deep Analysis")
-        if llm_client is None:
-            st.warning("⚠️ LLM key and URL is not added. LLM analysis is unavailable.")
+        if not client_available:
+            st.warning("⚠️ Hugging Face API key not configured. LLM analysis is unavailable.")
         else:
             st.markdown(f"""
                 Click the button below to use a powerful LLM to analyze the results.
@@ -178,7 +171,7 @@ def main():
                             llm_batch_results = batch_response['results']
                             total_tokens['prompt_tokens'] += batch_response['tokens_used'].get('prompt_tokens', 0)
                             total_tokens['completion_tokens'] += batch_response['tokens_used'].get('completion_tokens', 0)
-                            logging.info(f"Batch {i//batch_size + 1}: Prompt tokens = {batch_response['tokens_used']['prompt_tokens']}, Completion tokens = {batch_response['tokens_used']['completion_tokens']}, LLM Pairs = {len(llm_pairs)}, LLM Results = {len(llm_batch_results)}")
+                            logging.info(f"Batch {i//batch_size + 1}: Prompt tokens = {batch_response['tokens_used']['prompt_tokens']}, Completion tokens = {batch_response['tokens_used']['completion_tokens']}, LLM Pairs = {len(llm_pairs)}, LLM Results eighty = {len(llm_batch_results)}")
 
                             if len(llm_batch_results) != len(llm_pairs):
                                 logging.error(f"Batch {i//batch_size + 1}: LLM result length mismatch: expected {len(llm_pairs)}, got {len(llm_batch_results)}")
@@ -215,7 +208,7 @@ def main():
 
         st.subheader("📋 Results Table")
         note = f"**Note**: Skipped {base_skipped} base and {user_skipped} query entries due to empty or invalid text."
-        if 'LLM_Relationship' in df.columns and llm_client is not None:
+        if 'LLM_Relationship' in df.columns and client_available:
             total_token_count = st.session_state.total_tokens.get('prompt_tokens', 0) + st.session_state.total_tokens.get('completion_tokens', 0)
             note += f"<br>📊 **Total LLM tokens used**: {total_token_count} ({st.session_state.total_tokens.get('prompt_tokens', 0)} prompt + {st.session_state.total_tokens.get('completion_tokens', 0)} completion)"
         st.markdown(note, unsafe_allow_html=True)

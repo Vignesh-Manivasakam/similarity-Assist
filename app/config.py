@@ -44,9 +44,9 @@ LLM_BATCH_TOKEN_LIMIT = 100000
 LOG_LEVEL = 'INFO'
 
 # ---- LLM Configuration ----
-LLM_API_KEY = os.getenv("GENAI_API_KEY", "")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
-LLM_MODEL = "gemini-2.5-flash"
+LLM_API_KEY = os.getenv("HF_API_KEY", "")  # Hugging Face API token
+LLM_BASE_URL = "https://api-inference.huggingface.co/models/mixtral-8x7b-instruct-v0.1"
+LLM_MODEL = "mixtral-8x7b-instruct-v0.1"
 
 # LLM Optimization
 LLM_ANALYSIS_MIN_THRESHOLD = 0.80
