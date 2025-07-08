@@ -9,3 +9,4 @@ pint==0.24.4
 scikit-learn==1.5.2
 plotly==6.1.2
 python-dotenv==1.0.1
+openpyxl==3.1.5
