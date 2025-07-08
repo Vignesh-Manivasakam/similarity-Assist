@@ -1,20 +1,32 @@
 import os
 import json
 import logging
-import requests
 import hashlib
 import tiktoken
+import time
+import streamlit as st
+from huggingface_hub import InferenceClient, InferenceClientError
 from app.config import (
-    LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_CACHE_FILE,
-    SYSTEM_PROMPT_PATH, LLM_BATCH_TOKEN_LIMIT
+    LLM_MODEL,
+    LLM_CACHE_FILE,
+    SYSTEM_PROMPT_PATH,
+    LLM_BATCH_TOKEN_LIMIT
 )
 
 logger = logging.getLogger(__name__)
 
-# Check if Hugging Face API is configured
-client_available = bool(LLM_API_KEY and LLM_API_KEY != "YOUR_SUBSCRIPTION_KEY_HERE")
-if not client_available:
-    logger.error("Hugging Face API key not configured.")
+# Initialize InferenceClient with HF_TOKEN from Streamlit secrets
+client_available = "HF_TOKEN" in st.secrets
+if client_available:
+    try:
+        client = InferenceClient(model=LLM_MODEL, token=st.secrets["HF_TOKEN"])
+    except Exception as e:
+        logger.error(f"Failed to initialize InferenceClient: {e}")
+        client_available = False
+        client = None
+else:
+    logger.error("Hugging Face API token not configured in Streamlit secrets.")
+    client = None
 
 # Load system prompt
 try:
@@ -36,7 +48,7 @@ def load_llm_cache():
         with open(LLM_CACHE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (json.JSONDecodeError, IOError) as e:
-        logger.error(f"Failed to load or parse LLM cache '{LLM_CACHE_FILE}': {e}. Starting with an empty cache.")
+        logger.error(f"Failed to load or parse LLM cache '{LLM_CACHE_FILE}': {e}")
         return {}
 
 def save_llm_cache(cache):
@@ -57,36 +69,45 @@ def estimate_tokens(text: str) -> int:
         return len(text) // 4
 
 def _call_llm_api(full_prompt: str, num_pairs: int) -> dict:
-    """Helper function to make the API call to Hugging Face and handle responses."""
+    """Helper function to make the API call using InferenceClient and handle responses."""
     content, prompt_tokens, completion_tokens = "", 0, 0
     try:
+        if not client_available or client is None:
+            raise ValueError("InferenceClient not initialized.")
+        
         prompt_tokens = estimate_tokens(full_prompt)
-        headers = {"Authorization": f"Bearer {LLM_API_KEY}"}
-        response = requests.post(
-            LLM_BASE_URL,
-            headers=headers,
-            json={
-                "inputs": full_prompt,
-                "parameters": {"temperature": 0.0, "max_tokens": 1000}
-            },
-            timeout=30
+        logger.info(f"Sending prompt with {prompt_tokens} tokens for {num_pairs} pairs")
+        
+        completion = client.chat_completion(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_TEMPLATE},
+                {"role": "user", "content": full_prompt}
+            ],
+            temperature=0.0,
+            max_tokens=1000
         )
-        response.raise_for_status()
-        content = response.json()[0].get("generated_text", "")
+        
+        content = completion.choices[0].message["content"]
         completion_tokens = estimate_tokens(content)
+        
+        # Parse JSON response
         json_str = content.strip().lstrip('```json').rstrip('```').strip()
         analysis = json.loads(json_str)
-
+        
         if not isinstance(analysis, list) or len(analysis) != num_pairs:
             raise ValueError(f"LLM response length mismatch. Expected {num_pairs}, got {len(analysis)}")
-
+        
         results = [
             {'LLM_Score': result.get('score', 'Error'), 'LLM_Relationship': result.get('relationship', 'Parse Error')}
             for result in analysis
         ]
         return {'results': results, 'tokens_used': {'prompt_tokens': prompt_tokens, 'completion_tokens': completion_tokens}}
 
-    except (requests.exceptions.RequestException, json.JSONDecodeError, ValueError) as e:
+    except InferenceClientError as e:
+        logger.error(f"LLM call failed due to InferenceClientError: {e}. Response: '{content}'")
+        error_msg = f"InferenceClientError: {str(e)}"
+        return {'results': [{'LLM_Score': 'Error', 'LLM_Relationship': error_msg}] * num_pairs, 'tokens_used': {'prompt_tokens': prompt_tokens, 'completion_tokens': completion_tokens}}
+    except (json.JSONDecodeError, ValueError) as e:
         error_type = type(e).__name__
         logger.error(f"LLM call failed due to {error_type}: {e}. Response: '{content}'")
         error_msg = f"{error_type} Error"
@@ -97,11 +118,12 @@ def _call_llm_api(full_prompt: str, num_pairs: int) -> dict:
 
 def _process_batch(batch_pairs: list, cache: dict) -> dict:
     """Processes a single batch of sentence pairs against the LLM, using caching."""
+    time.sleep(5)  # Delay to avoid rate limits
     batch_prompt_body = ""
     for i, (s1, s2) in enumerate(batch_pairs):
         batch_prompt_body += f"Pair {i+1}:\nSentence 1: \"{s1}\"\nSentence 2: \"{s2}\"\n"
 
-    full_prompt = SYSTEM_PROMPT_TEMPLATE + "\n" + batch_prompt_body
+    full_prompt = batch_prompt_body
     cache_key = compute_prompt_hash(full_prompt)
 
     if cache_key in cache:
