@@ -20,7 +20,8 @@ FAISS_INDEX_FILE = os.path.join(CACHE_DIR, "base_index.faiss")
 HASH_FILE = os.path.join(CACHE_DIR, "base_file_hash.txt")
 
 # Model configuration
-HF_MODEL_NAME = 'intfloat/e5-large-v2'
+HF_MODEL_NAME = 'intfloat/e5-large-v2'  # Embedding model
+LLM_MODEL = 'meta-llama/Meta-Llama-3-70B-Instruct'  # LLM model
 
 # Prompt file for maintainability
 SYSTEM_PROMPT_PATH = os.path.join(PROMPT_DIR, 'system_prompt.txt')
@@ -44,10 +45,6 @@ LLM_BATCH_TOKEN_LIMIT = 100000
 LOG_LEVEL = 'INFO'
 
 # ---- LLM Configuration ----
-LLM_API_KEY = os.getenv("HF_API_KEY", "")  # Hugging Face API token
-LLM_BASE_URL = "https://api-inference.huggingface.co/models/mixtral-8x7b-instruct-v0.1"
-LLM_MODEL = "mixtral-8x7b-instruct-v0.1"
-
-# LLM Optimization
+LLM_API_TOKEN = os.getenv("HF_TOKEN", "")  # Reference HF_TOKEN
 LLM_ANALYSIS_MIN_THRESHOLD = 0.80
 LLM_PERFECT_MATCH_THRESHOLD = 0.999
