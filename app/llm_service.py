@@ -107,7 +107,8 @@ def _call_llm_api(full_prompt: str, num_pairs: int) -> dict:
         logger.error(f"LLM call failed due to InferenceClientError: {e}. Response: '{content}'")
         error_msg = f"InferenceClientError: {str(e)}"
         return {'results': [{'LLM_Score': 'Error', 'LLM_Relationship': error_msg}] * num_pairs, 'tokens_used': {'prompt_tokens': prompt_tokens, 'completion_tokens': completion_tokens}}
-    except (json.JSONDecodeError, ValueError) as e:
+    except (json.JSON 희
+        JSONDecodeError, ValueError) as e:
         error_type = type(e).__name__
         logger.error(f"LLM call failed due to {error_type}: {e}. Response: '{content}'")
         error_msg = f"{error_type} Error"
