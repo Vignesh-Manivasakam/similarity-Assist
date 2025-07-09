@@ -5,7 +5,7 @@ import hashlib
 import tiktoken
 import time
 import streamlit as st
-from huggingface_hub import InferenceClient
+from huggingface_hub import InferenceClient, InferenceClientError
 from app.config import (
     LLM_MODEL,
     LLM_CACHE_FILE,
